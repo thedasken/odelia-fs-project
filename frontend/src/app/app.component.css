@@ -58,3 +58,53 @@
 main {
   padding: 0 1.5rem 3rem;
 }
+
+.notifications {
+  position: relative;
+}
+
+.bell {
+  padding: 0.25rem 0.7rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  background: #fff;
+  color: #334155;
+  font: inherit;
+  font-size: 0.85rem;
+  cursor: pointer;
+}
+
+.bell .unread {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+.notification-list {
+  position: absolute;
+  right: 0;
+  z-index: 10;
+  width: 20rem;
+  margin: 0.3rem 0 0;
+  padding: 0;
+  list-style: none;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+}
+
+.notification-list li {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #f1f5f9;
+  cursor: pointer;
+}
+
+.notification-list .unread-item {
+  font-weight: 600;
+  background: #f8fafc;
+}
+
+.muted {
+  color: #64748b;
+}

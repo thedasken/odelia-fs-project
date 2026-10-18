@@ -13,6 +13,15 @@ export interface BoardMember {
   username: string;
 }
 
+/** Mirrors com.odelia.kanban.entity.Notification: a message for the signed-in user. */
+export interface Notification {
+  id: number;
+  boardId?: number;
+  message: string;
+  read: boolean;
+  createdAt?: string;
+}
+
 /** Mirrors com.odelia.kanban.entity.BoardList: a column of a board. */
 export interface BoardList {
   id?: number;

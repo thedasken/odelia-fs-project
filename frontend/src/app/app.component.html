@@ -4,6 +4,27 @@
 
   @if (auth.authenticated()) {
     <div class="account">
+      <div class="notifications">
+        <button
+          type="button"
+          class="bell"
+          aria-label="Notifications"
+          (click)="notificationsOpen.set(!notificationsOpen())">
+          Notifications
+          @if (unreadCount() > 0) {
+            <span class="badge unread">{{ unreadCount() }}</span>
+          }
+        </button>
+        @if (notificationsOpen()) {
+          <ul class="notification-list">
+            @for (n of notifications(); track n.id) {
+              <li [class.unread-item]="!n.read" (click)="markRead(n)">{{ n.message }}</li>
+            } @empty {
+              <li class="muted">No notification.</li>
+            }
+          </ul>
+        }
+      </div>
       <span class="user">{{ auth.username() }}</span>
       @if (auth.isAdmin()) {
         <span class="badge">admin</span>

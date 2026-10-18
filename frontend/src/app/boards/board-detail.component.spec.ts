@@ -1,7 +1,7 @@
-import { TestBed } from '@angular/core/testing';
+import { TestBed, fakeAsync, discardPeriodicTasks, tick } from '@angular/core/testing';
 import { provideHttpClient } from '@angular/common/http';
 import { HttpTestingController, provideHttpClientTesting } from '@angular/common/http/testing';
-import { ActivatedRoute } from '@angular/router';
+import { ActivatedRoute, Router } from '@angular/router';
 
 import { AuthService } from '../auth/auth.service';
 import { BoardDetailComponent } from './board-detail.component';
@@ -205,11 +205,11 @@ describe('BoardDetailComponent', () => {
     expect(controls()).toEqual({ members: 1, form: false, remove: 0 });
 
     auth.username.set('alice');
-    expect(controls()).toEqual({ members: 1, form: true, remove: 1 });
+    expect(controls()).toEqual({ members: 1, form: true, remove: 2 });
 
     auth.username.set('carol');
     auth.roles.set(['admin']);
-    expect(controls()).toEqual({ members: 1, form: true, remove: 1 });
+    expect(controls()).toEqual({ members: 1, form: true, remove: 2 });
   });
 
   it('shows a readable error when adding or removing a member is refused with a 403', () => {
@@ -232,4 +232,64 @@ describe('BoardDetailComponent', () => {
     expect(component.error()).toContain('only the owner can manage members');
     expect(component.members().length).toBe(1);
   });
+
+  it('POSTs the transfer, then shows the new owner and reloads the members', () => {
+    const fixture = TestBed.createComponent(BoardDetailComponent);
+    const component = fixture.componentInstance;
+    spyOn(window, 'confirm').and.returnValue(true);
+    fixture.detectChanges();
+
+    http.expectOne('/api/boards/7').flush({ id: 7, name: 'Sprint 1', owner: 'alice' });
+    http.expectOne('/api/boards/7/members').flush([{ id: 1, boardId: 7, username: 'bob' }]);
+    http.expectOne('/api/boards/7/lists').flush([]);
+
+    component.makeOwner(component.members()[0]);
+    const post = http.expectOne('/api/boards/7/owner');
+    expect(post.request.method).toBe('POST');
+    expect(post.request.body).toEqual({ username: 'bob' });
+    post.flush({ id: 7, name: 'Sprint 1', owner: 'bob' });
+    http.expectOne('/api/boards/7/members').flush([{ id: 2, boardId: 7, username: 'alice' }]);
+
+    expect(component.board()?.owner).toBe('bob');
+    expect(component.members().map(m => m.username)).toEqual(['alice']);
+  });
+
+  it('refreshes the board and members periodically', fakeAsync(() => {
+    const fixture = TestBed.createComponent(BoardDetailComponent);
+    const component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    http.expectOne('/api/boards/7').flush({ id: 7, name: 'Sprint 1', owner: 'alice' });
+    http.expectOne('/api/boards/7/members').flush([]);
+    http.expectOne('/api/boards/7/lists').flush([]);
+
+    tick(10_000);
+    http.expectOne('/api/boards/7').flush({ id: 7, name: 'Sprint 1', owner: 'alice' });
+    http.expectOne('/api/boards/7/members').flush([{ id: 1, boardId: 7, username: 'bob' }]);
+    expect(component.members().map(m => m.username)).toEqual(['bob']);
+
+    // Destroying the component stops the polling timer before fakeAsync ends.
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
+
+  it('goes back to the board list when access is lost', fakeAsync(() => {
+    const fixture = TestBed.createComponent(BoardDetailComponent);
+    const navigate = spyOn(TestBed.inject(Router), 'navigate');
+    fixture.detectChanges();
+
+    http.expectOne('/api/boards/7').flush({ id: 7, name: 'Sprint 1', owner: 'alice' });
+    http.expectOne('/api/boards/7/members').flush([]);
+    http.expectOne('/api/boards/7/lists').flush([]);
+
+    tick(10_000);
+    // forkJoin cancels the members request as soon as the board request fails.
+    http.expectOne('/api/boards/7').flush('', { status: 403, statusText: 'Forbidden' });
+    http.match('/api/boards/7/members');
+    expect(navigate).toHaveBeenCalledWith(['/']);
+
+    // Destroying the component stops the polling timer before fakeAsync ends.
+    fixture.destroy();
+    discardPeriodicTasks();
+  }));
 });

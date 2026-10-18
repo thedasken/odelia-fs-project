@@ -3,10 +3,12 @@ package com.odelia.kanban.resource;
 import com.odelia.kanban.entity.Board;
 import com.odelia.kanban.entity.BoardList;
 import com.odelia.kanban.entity.BoardMember;
+import com.odelia.kanban.entity.Notification;
 import com.odelia.kanban.repository.BoardListRepository;
 import com.odelia.kanban.repository.BoardMemberRepository;
 import com.odelia.kanban.repository.BoardRepository;
 import com.odelia.kanban.repository.CardRepository;
+import com.odelia.kanban.repository.NotificationRepository;
 import com.odelia.kanban.security.BoardAccess;
 import com.odelia.kanban.security.CurrentUser;
 import jakarta.annotation.security.RolesAllowed;
@@ -76,6 +78,9 @@ public class BoardResource {
 
     @Inject
     BoardMemberRepository members;
+
+    @Inject
+    NotificationRepository notifications;
 
     @Context
     UriInfo uriInfo;
@@ -197,6 +202,7 @@ public class BoardResource {
             throw badRequest(username + " is already a member of this board");
         }
         BoardMember created = members.insert(new BoardMember(id, username));
+        notifyUser(username, board, currentUser.name() + " added you to the board \"" + board.getName() + "\"");
         return Response.created(uriInfo.getAbsolutePathBuilder().path(username).build())
                        .entity(created)
                        .build();
@@ -216,7 +222,45 @@ public class BoardResource {
                                             username + " is not a member of this board",
                                             Response.Status.NOT_FOUND));
         members.delete(member);
+        notifyUser(username, board, currentUser.name() + " removed you from the board \"" + board.getName() + "\"");
         return Response.noContent().build();
+    }
+
+    /**
+     * Hands the board to another user. The previous owner stays on the board as
+     * a member, and the new owner stops being one: the owner is never a
+     * {@code BoardMember} row.
+     */
+    @POST
+    @Path("/{id}/owner")
+    @Transactional
+    @Operation(operationId = "transferBoardOwnership")
+    public Board transferOwnership(@PathParam("id") long id, @Valid TransferOwnerCommand command) {
+        Board board = ownedBoard(id);
+        String newOwner = command.username().trim();
+        if (newOwner.isEmpty()) {
+            throw badRequest("A username is required");
+        }
+        String previousOwner = board.getOwner();
+        if (newOwner.equals(previousOwner)) {
+            throw badRequest(newOwner + " already owns this board");
+        }
+        members.findByBoardIdAndUsername(id, newOwner).ifPresent(members::delete);
+        if (previousOwner != null && !members.existsByBoardIdAndUsername(id, previousOwner)) {
+            members.insert(new BoardMember(id, previousOwner));
+        }
+        board.setOwner(newOwner);
+        Board saved = boards.save(board);
+        notifyUser(newOwner, board, currentUser.name() + " made you the owner of the board \"" + board.getName() + "\"");
+        notifyUser(previousOwner, board, newOwner + " is now the owner of the board \"" + board.getName() + "\"");
+        return saved;
+    }
+
+    /** Leaves a notification for a user - never for the caller, who just did the action. */
+    private void notifyUser(String username, Board board, String message) {
+        if (username != null && !username.equals(currentUser.name())) {
+            notifications.insert(new Notification(username, board.getId(), message));
+        }
     }
 
     /** Loads a board the caller is allowed to work on: 404 if it is gone, 403 if they are neither owner, member nor admin. */

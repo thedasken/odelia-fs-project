@@ -17,6 +17,7 @@
           <li>
             {{ member.username }}
             @if (canManageMembers()) {
+              <button type="button" class="ghost" (click)="makeOwner(member)">Make owner</button>
               <button type="button" class="ghost" (click)="removeMember(member)">Remove</button>
             }
           </li>

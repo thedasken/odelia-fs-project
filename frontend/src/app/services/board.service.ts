@@ -3,7 +3,7 @@ import { Injectable, inject } from '@angular/core';
 import { Observable } from 'rxjs';
 
 import { environment } from '../../environments/environment';
-import { Board, BoardList, BoardMember, Card } from '../models/board';
+import { Board, BoardList, BoardMember, Card, Notification } from '../models/board';
 
 /**
  * Single entry point to the Kanban REST API.
@@ -16,6 +16,7 @@ import { Board, BoardList, BoardMember, Card } from '../models/board';
 export class BoardService {
   private readonly http = inject(HttpClient);
   private readonly baseUrl = `${environment.apiUrl}/boards`;
+  private readonly notificationsUrl = `${environment.apiUrl}/notifications`;
   private readonly listsUrl = `${environment.apiUrl}/lists`;
   private readonly cardsUrl = `${environment.apiUrl}/cards`;
 
@@ -49,6 +50,18 @@ export class BoardService {
 
   removeMember(boardId: number, username: string): Observable<void> {
     return this.http.delete<void>(`${this.baseUrl}/${boardId}/members/${encodeURIComponent(username)}`);
+  }
+
+  transferOwnership(boardId: number, username: string): Observable<Board> {
+    return this.http.post<Board>(`${this.baseUrl}/${boardId}/owner`, { username });
+  }
+
+  getNotifications(): Observable<Notification[]> {
+    return this.http.get<Notification[]>(this.notificationsUrl);
+  }
+
+  markNotificationRead(id: number): Observable<void> {
+    return this.http.post<void>(`${this.notificationsUrl}/${id}/read`, null);
   }
 
   getLists(boardId: number): Observable<BoardList[]> {

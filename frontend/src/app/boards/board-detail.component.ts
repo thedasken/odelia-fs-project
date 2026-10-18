@@ -1,5 +1,6 @@
-import { Component, ElementRef, OnInit, inject, signal, viewChildren } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Component, DestroyRef, ElementRef, OnInit, inject, signal, viewChildren } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
   CdkDrag,
@@ -9,7 +10,7 @@ import {
   moveItemInArray,
   transferArrayItem
 } from '@angular/cdk/drag-drop';
-import { forkJoin } from 'rxjs';
+import { EMPTY, catchError, forkJoin, switchMap, timer } from 'rxjs';
 
 import { AuthService } from '../auth/auth.service';
 import { Board, BoardList, BoardMember, Card } from '../models/board';
@@ -32,6 +33,9 @@ import { BoardService } from '../services/board.service';
  * several cards can be typed in a row. The description is filled in afterwards
  * through the inline card editor.
  */
+/** How often the board and its members are fetched again, in milliseconds. */
+const REFRESH_MS = 10_000;
+
 @Component({
   selector: 'app-board-detail',
   imports: [FormsModule, RouterLink, CdkDropListGroup, CdkDropList, CdkDrag],
@@ -42,6 +46,8 @@ export class BoardDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly boardService = inject(BoardService);
   private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly board = signal<Board | null>(null);
   readonly columns = signal<BoardList[]>([]);
@@ -75,6 +81,37 @@ export class BoardDetailComponent implements OnInit {
   ngOnInit(): void {
     this.boardId = Number(this.route.snapshot.paramMap.get('id'));
     this.reload();
+    this.watchAccess();
+  }
+
+  /**
+   * Periodic refresh of the board and its members, so a change made by someone
+   * else shows up without a page reload. Only these two are refreshed - the
+   * columns and cards are left alone so a drag or an open editor is not disturbed.
+   * If the caller lost access (403) or the board is gone (404), go back to the list.
+   */
+  private watchAccess(): void {
+    timer(REFRESH_MS, REFRESH_MS)
+      .pipe(
+        switchMap(() =>
+          forkJoin({
+            board: this.boardService.getBoard(this.boardId),
+            members: this.boardService.getMembers(this.boardId)
+          }).pipe(
+            catchError(err => {
+              if (err?.status === 403 || err?.status === 404) {
+                this.router.navigate(['/']);
+              }
+              return EMPTY;
+            })
+          )
+        ),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe(({ board, members }) => {
+        this.board.set(board);
+        this.members.set(members);
+      });
   }
 
   reload(): void {
@@ -124,6 +161,23 @@ export class BoardDetailComponent implements OnInit {
     this.boardService.removeMember(this.boardId, member.username).subscribe({
       next: () => this.members.update(members => members.filter(m => m.username !== member.username)),
       error: err => this.failMember(`Could not remove "${member.username}"`, err)
+    });
+  }
+
+  makeOwner(member: BoardMember): void {
+    if (!confirm(`Make ${member.username} the owner of this board? You will become a member.`)) {
+      return;
+    }
+    this.error.set(null);
+    this.boardService.transferOwnership(this.boardId, member.username).subscribe({
+      next: board => {
+        this.board.set(board);
+        this.boardService.getMembers(this.boardId).subscribe({
+          next: members => this.members.set(members),
+          error: err => this.fail('Could not load the members', err)
+        });
+      },
+      error: err => this.failMember(`Could not make "${member.username}" the owner`, err)
     });
   }
 
