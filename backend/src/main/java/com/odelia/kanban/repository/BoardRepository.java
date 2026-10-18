@@ -6,6 +6,7 @@ import jakarta.data.repository.Find;
 import jakarta.data.repository.OrderBy;
 import jakarta.data.repository.Repository;
 
+import java.util.Collection;
 import java.util.List;
 
 /**
@@ -31,4 +32,7 @@ public interface BoardRepository extends CrudRepository<Board, Long> {
      * {@code owner} is the {@code preferred_username} taken from the JWT.
      */
     List<Board> findByOwnerOrderByNameAsc(String owner);
+
+    /** The boards with the given ids - used for the boards shared with a user. */
+    List<Board> findByIdInOrderByNameAsc(Collection<Long> ids);
 }

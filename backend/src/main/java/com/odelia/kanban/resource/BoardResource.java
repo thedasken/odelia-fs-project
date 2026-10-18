@@ -2,7 +2,9 @@ package com.odelia.kanban.resource;
 
 import com.odelia.kanban.entity.Board;
 import com.odelia.kanban.entity.BoardList;
+import com.odelia.kanban.entity.BoardMember;
 import com.odelia.kanban.repository.BoardListRepository;
+import com.odelia.kanban.repository.BoardMemberRepository;
 import com.odelia.kanban.repository.BoardRepository;
 import com.odelia.kanban.repository.CardRepository;
 import com.odelia.kanban.security.BoardAccess;
@@ -29,7 +31,10 @@ import org.eclipse.microprofile.openapi.annotations.Operation;
 import org.eclipse.microprofile.openapi.annotations.security.SecurityRequirement;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /**
  * CRUD over boards, plus the lists (columns) they contain.
@@ -39,6 +44,10 @@ import java.util.List;
  * into a 403. On top of that a board belongs to the person who created it - the
  * {@code preferred_username} from the JWT - so the listing is filtered and the
  * per-board endpoints go through {@link BoardAccess}.</p>
+ *
+ * <p>A board can be shared with other users (members). Members may work on its
+ * columns and cards; renaming or deleting the board and managing the members
+ * stay with the owner (or an admin).</p>
  */
 @Path("/boards")
 @RequestScoped
@@ -65,16 +74,31 @@ public class BoardResource {
     @Inject
     CardRepository cards;
 
+    @Inject
+    BoardMemberRepository members;
+
     @Context
     UriInfo uriInfo;
 
-    /** The caller's own boards - or every board, for an admin. */
+    /** The caller's own boards and the boards shared with them - or every board, for an admin. */
     @GET
     @Operation(operationId = "getBoards")
     public List<Board> listBoards() {
-        return currentUser.isAdmin()
-                ? boards.findAllSortedByName()
-                : boards.findByOwnerOrderByNameAsc(currentUser.name());
+        if (currentUser.isAdmin()) {
+            return boards.findAllSortedByName();
+        }
+        List<Board> result = new ArrayList<>(boards.findByOwnerOrderByNameAsc(currentUser.name()));
+        List<Long> sharedIds = members.findByUsername(currentUser.name()).stream()
+                                      .map(BoardMember::getBoardId)
+                                      .toList();
+        if (!sharedIds.isEmpty()) {
+            result.addAll(boards.findByIdInOrderByNameAsc(sharedIds));
+        }
+        return result.stream()
+                     .collect(Collectors.toMap(Board::getId, b -> b, (a, b) -> a))
+                     .values().stream()
+                     .sorted(Comparator.comparing(Board::getName))
+                     .toList();
     }
 
     @GET
@@ -109,7 +133,7 @@ public class BoardResource {
     @Path("/{id}")
     @Transactional
     public Board updateBoard(@PathParam("id") long id, @Valid Board board) {
-        Board existing = accessibleBoard(id);
+        Board existing = ownedBoard(id);
         existing.setName(board.getName());
         return boards.save(existing);
     }
@@ -118,7 +142,8 @@ public class BoardResource {
     @Path("/{id}")
     @Transactional
     public Response deleteBoard(@PathParam("id") long id) {
-        Board existing = accessibleBoard(id);
+        Board existing = ownedBoard(id);
+        members.deleteByBoardId(id);
         for (BoardList column : lists.findByBoardIdOrderByPositionAsc(id)) {
             cards.deleteByListId(column.getId());
         }
@@ -147,11 +172,69 @@ public class BoardResource {
                        .build();
     }
 
-    /** Loads a board the caller is allowed to work on: 404 if it is gone, 403 if it is not theirs. */
+    @GET
+    @Path("/{id}/members")
+    @Operation(operationId = "getBoardMembers")
+    public List<BoardMember> listMembers(@PathParam("id") long id) {
+        accessibleBoard(id);
+        return members.findByBoardIdOrderByUsernameAsc(id);
+    }
+
+    @POST
+    @Path("/{id}/members")
+    @Transactional
+    @Operation(operationId = "addBoardMember")
+    public Response addMember(@PathParam("id") long id, @Valid AddMemberCommand command) {
+        Board board = ownedBoard(id);
+        String username = command.username().trim();
+        if (username.isEmpty()) {
+            throw badRequest("A username is required");
+        }
+        if (username.equals(board.getOwner())) {
+            throw badRequest("The owner of a board cannot be added as a member");
+        }
+        if (members.existsByBoardIdAndUsername(id, username)) {
+            throw badRequest(username + " is already a member of this board");
+        }
+        BoardMember created = members.insert(new BoardMember(id, username));
+        return Response.created(uriInfo.getAbsolutePathBuilder().path(username).build())
+                       .entity(created)
+                       .build();
+    }
+
+    @DELETE
+    @Path("/{id}/members/{username}")
+    @Transactional
+    @Operation(operationId = "removeBoardMember")
+    public Response removeMember(@PathParam("id") long id, @PathParam("username") String username) {
+        Board board = ownedBoard(id);
+        if (username.equals(board.getOwner())) {
+            throw badRequest("The owner of a board is not a member and cannot be removed");
+        }
+        BoardMember member = members.findByBoardIdAndUsername(id, username)
+                                    .orElseThrow(() -> new WebApplicationException(
+                                            username + " is not a member of this board",
+                                            Response.Status.NOT_FOUND));
+        members.delete(member);
+        return Response.noContent().build();
+    }
+
+    /** Loads a board the caller is allowed to work on: 404 if it is gone, 403 if they are neither owner, member nor admin. */
     private Board accessibleBoard(long id) {
         Board board = boards.findById(id).orElseThrow(() -> notFound(id));
         access.requireBoardAccess(board);
         return board;
+    }
+
+    /** Loads a board only its owner (or an admin) may change: 404 if it is gone, 403 for anyone else, members included. */
+    private Board ownedBoard(long id) {
+        Board board = boards.findById(id).orElseThrow(() -> notFound(id));
+        access.requireBoardOwner(board);
+        return board;
+    }
+
+    private WebApplicationException badRequest(String message) {
+        return new WebApplicationException(message, Response.Status.BAD_REQUEST);
     }
 
     private WebApplicationException notFound(long id) {
