@@ -59,4 +59,16 @@ describe('AppComponent', () => {
 
     expect(component.unreadCount()).toBe(0);
   });
+
+  it('renders each notification as a button so it works with the keyboard', () => {
+    const fixture = TestBed.createComponent(AppComponent);
+    TestBed.inject(AuthService).authenticated.set(true);
+    fixture.componentInstance.notifications.set([{ id: 5, message: 'hi', read: false }]);
+    fixture.componentInstance.notificationsOpen.set(true);
+    fixture.detectChanges();
+    TestBed.inject(HttpTestingController).match('/api/notifications');
+
+    const button: HTMLButtonElement = fixture.nativeElement.querySelector('.notification-list button.notification');
+    expect(button.textContent).toContain('hi');
+  });
 });

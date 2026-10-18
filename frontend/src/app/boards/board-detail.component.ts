@@ -99,9 +99,7 @@ export class BoardDetailComponent implements OnInit {
             members: this.boardService.getMembers(this.boardId)
           }).pipe(
             catchError(err => {
-              if (err?.status === 403 || err?.status === 404) {
-                this.router.navigate(['/']);
-              }
+              this.leaveIfNoAccess(err);
               return EMPTY;
             })
           )
@@ -121,18 +119,18 @@ export class BoardDetailComponent implements OnInit {
     this.composingColumnId.set(null);
     this.boardService.getBoard(this.boardId).subscribe({
       next: board => this.board.set(board),
-      error: err => this.fail('Could not load the board', err)
+      error: err => this.failLoading('Could not load the board', err)
     });
     this.boardService.getMembers(this.boardId).subscribe({
       next: members => this.members.set(members),
-      error: err => this.fail('Could not load the members', err)
+      error: err => this.failLoading('Could not load the members', err)
     });
     this.boardService.getLists(this.boardId).subscribe({
       next: columns => {
         this.columns.set(columns);
         this.loadCards(columns);
       },
-      error: err => this.fail('Could not load the columns', err)
+      error: err => this.failLoading('Could not load the columns', err)
     });
   }
 
@@ -350,6 +348,18 @@ export class BoardDetailComponent implements OnInit {
   /** Re-emit the record so the template re-renders after an in-place mutation. */
   private refresh(): void {
     this.cardsByList.set({ ...this.cardsByList() });
+  }
+
+  /** Shows the error, and goes back to the list at once if the board is forbidden (403) or gone (404). */
+  private failLoading(message: string, err: { status?: number }): void {
+    this.fail(message, err);
+    this.leaveIfNoAccess(err);
+  }
+
+  private leaveIfNoAccess(err: { status?: number }): void {
+    if (err?.status === 403 || err?.status === 404) {
+      this.router.navigate(['/']);
+    }
   }
 
   /** Like {@link fail}, with the reason the backend gives for the two expected refusals. */

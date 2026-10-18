@@ -94,10 +94,26 @@ main {
 }
 
 .notification-list li {
+  border-bottom: 1px solid #f1f5f9;
+}
+
+/* A real button, so a notification can be reached and read with the keyboard. */
+.notification-list .notification {
+  display: block;
+  width: 100%;
+  padding: 0.5rem 0.75rem;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.notification-list .muted {
   padding: 0.5rem 0.75rem;
   font-size: 0.85rem;
-  border-bottom: 1px solid #f1f5f9;
-  cursor: pointer;
 }
 
 .notification-list .unread-item {

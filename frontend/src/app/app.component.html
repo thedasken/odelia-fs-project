@@ -18,7 +18,9 @@
         @if (notificationsOpen()) {
           <ul class="notification-list">
             @for (n of notifications(); track n.id) {
-              <li [class.unread-item]="!n.read" (click)="markRead(n)">{{ n.message }}</li>
+              <li [class.unread-item]="!n.read">
+                <button type="button" class="notification" (click)="markRead(n)">{{ n.message }}</button>
+              </li>
             } @empty {
               <li class="muted">No notification.</li>
             }
