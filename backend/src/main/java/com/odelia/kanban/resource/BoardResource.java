@@ -230,6 +230,10 @@ public class BoardResource {
      * Hands the board to another user. The previous owner stays on the board as
      * a member, and the new owner stops being one: the owner is never a
      * {@code BoardMember} row.
+     *
+     * <p>"Transfer to yourself" means the board's current owner as the target:
+     * that is a {@code 400}. An admin may hand any board to themselves, in line
+     * with an admin being allowed to do anything on any board.</p>
      */
     @POST
     @Path("/{id}/owner")

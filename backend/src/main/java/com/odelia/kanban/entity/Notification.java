@@ -20,6 +20,14 @@ import java.time.LocalDateTime;
 @Table(name = "NOTIFICATION")
 public class Notification {
 
+    /**
+     * Size of the MESSAGE column. A message is built from a username and a board
+     * name (120 characters each), so it can be longer: the constructor cuts it,
+     * because a notification that does not fit must never fail the action
+     * (add, remove, transfer) it is created in.
+     */
+    public static final int MESSAGE_MAX = 255;
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
@@ -30,7 +38,7 @@ public class Notification {
     @Column(name = "BOARD_ID")
     private Long boardId;
 
-    @Column(name = "MESSAGE", nullable = false, length = 255)
+    @Column(name = "MESSAGE", nullable = false, length = MESSAGE_MAX)
     private String message;
 
     /** "READ" is a keyword in several databases, hence the explicit column name. */
@@ -46,7 +54,9 @@ public class Notification {
     public Notification(String username, Long boardId, String message) {
         this.username = username;
         this.boardId = boardId;
-        this.message = message;
+        this.message = message.length() <= MESSAGE_MAX
+                ? message
+                : message.substring(0, MESSAGE_MAX - 1) + "…";
         this.createdAt = LocalDateTime.now();
     }
 
