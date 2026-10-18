@@ -11,7 +11,8 @@ import {
 } from '@angular/cdk/drag-drop';
 import { forkJoin } from 'rxjs';
 
-import { Board, BoardList, Card } from '../models/board';
+import { AuthService } from '../auth/auth.service';
+import { Board, BoardList, BoardMember, Card } from '../models/board';
 import { BoardService } from '../services/board.service';
 
 /**
@@ -40,13 +41,18 @@ import { BoardService } from '../services/board.service';
 export class BoardDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly boardService = inject(BoardService);
+  private readonly auth = inject(AuthService);
 
   readonly board = signal<Board | null>(null);
   readonly columns = signal<BoardList[]>([]);
   /** Cards keyed by column id. The arrays are mutated in place by the CDK helpers. */
   readonly cardsByList = signal<Record<number, Card[]>>({});
+  readonly members = signal<BoardMember[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
+
+  /** Username typed in the "add a member" field (owner only). */
+  newMemberName = '';
 
   /** One "add a card" draft (title + description) per column, keyed by column id. */
   readonly drafts: Record<number, { title: string; description: string }> = {};
@@ -80,12 +86,44 @@ export class BoardDetailComponent implements OnInit {
       next: board => this.board.set(board),
       error: err => this.fail('Could not load the board', err)
     });
+    this.boardService.getMembers(this.boardId).subscribe({
+      next: members => this.members.set(members),
+      error: err => this.fail('Could not load the members', err)
+    });
     this.boardService.getLists(this.boardId).subscribe({
       next: columns => {
         this.columns.set(columns);
         this.loadCards(columns);
       },
       error: err => this.fail('Could not load the columns', err)
+    });
+  }
+
+  /** Only the owner (or an admin) manages the members; a member just sees the list. */
+  canManageMembers(): boolean {
+    return this.auth.isAdmin() || this.board()?.owner === this.auth.username();
+  }
+
+  addMember(): void {
+    const username = this.newMemberName.trim();
+    if (!username) {
+      return;
+    }
+    this.error.set(null);
+    this.boardService.addMember(this.boardId, username).subscribe({
+      next: member => {
+        this.members.update(members => [...members, member].sort((a, b) => a.username.localeCompare(b.username)));
+        this.newMemberName = '';
+      },
+      error: err => this.failMember(`Could not add "${username}"`, err)
+    });
+  }
+
+  removeMember(member: BoardMember): void {
+    this.error.set(null);
+    this.boardService.removeMember(this.boardId, member.username).subscribe({
+      next: () => this.members.update(members => members.filter(m => m.username !== member.username)),
+      error: err => this.failMember(`Could not remove "${member.username}"`, err)
     });
   }
 
@@ -258,6 +296,16 @@ export class BoardDetailComponent implements OnInit {
   /** Re-emit the record so the template re-renders after an in-place mutation. */
   private refresh(): void {
     this.cardsByList.set({ ...this.cardsByList() });
+  }
+
+  /** Like {@link fail}, with the reason the backend gives for the two expected refusals. */
+  private failMember(message: string, err: { status?: number }): void {
+    const reason = err.status === 400
+      ? ' (already a member, or the owner)'
+      : err.status === 403
+        ? ' (only the owner can manage members)'
+        : '';
+    this.fail(message + reason, err);
   }
 
   private fail(message: string, err: unknown): void {

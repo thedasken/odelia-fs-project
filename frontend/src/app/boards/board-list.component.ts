@@ -3,6 +3,7 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
+import { AuthService } from '../auth/auth.service';
 import { Board } from '../models/board';
 import { BoardService } from '../services/board.service';
 
@@ -18,6 +19,7 @@ import { BoardService } from '../services/board.service';
 })
 export class BoardListComponent implements OnInit {
   private readonly boardService = inject(BoardService);
+  private readonly auth = inject(AuthService);
 
   readonly boards = signal<Board[]>([]);
   readonly loading = signal(false);
@@ -102,6 +104,11 @@ export class BoardListComponent implements OnInit {
       },
       error: err => this.fail(`Could not rename "${board.name}"`, err)
     });
+  }
+
+  /** Only the owner (or an admin) may rename or delete a board; members just work inside it. */
+  canManage(board: Board): boolean {
+    return this.auth.isAdmin() || board.owner === this.auth.username();
   }
 
   private fail(message: string, err: unknown): void {

@@ -42,8 +42,12 @@
                   · {{ board.createdAt | date: 'short' }}
                 }
               </span>
-              <button type="button" (click)="startRename(board)">Rename</button>
-              <button class="danger" type="button" (click)="deleteBoard(board)">Delete</button>
+              @if (canManage(board)) {
+                <button type="button" (click)="startRename(board)">Rename</button>
+                <button class="danger" type="button" (click)="deleteBoard(board)">Delete</button>
+              } @else {
+                <span class="meta">shared with you</span>
+              }
             </div>
           }
         </li>

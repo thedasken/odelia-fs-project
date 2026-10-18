@@ -3,6 +3,7 @@ import { HttpTestingController, provideHttpClientTesting } from '@angular/common
 import { TestBed } from '@angular/core/testing';
 import { provideRouter } from '@angular/router';
 
+import { AuthService } from '../auth/auth.service';
 import { routes } from '../app.routes';
 import { BoardListComponent } from './board-list.component';
 
@@ -41,5 +42,19 @@ describe('BoardListComponent', () => {
 
     expect(component.boards().map(b => b.name)).toEqual(['Aardvark', 'Apple']);
     expect(component.editingBoardId()).toBeNull();
+  });
+
+  it('lets only the owner or an admin rename and delete a board', () => {
+    const component = TestBed.createComponent(BoardListComponent).componentInstance;
+    const auth = TestBed.inject(AuthService);
+    const board = { id: 1, name: 'Shared', owner: 'alice' };
+
+    auth.username.set('bob');
+    expect(component.canManage(board)).toBeFalse();
+    auth.username.set('alice');
+    expect(component.canManage(board)).toBeTrue();
+    auth.username.set('carol');
+    auth.roles.set(['admin']);
+    expect(component.canManage(board)).toBeTrue();
   });
 });
