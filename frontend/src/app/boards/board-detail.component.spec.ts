@@ -182,19 +182,54 @@ describe('BoardDetailComponent', () => {
     expect(component.members().length).toBe(0);
   });
 
-  it('shows the member controls to the owner only', () => {
+  it('renders the member controls for the owner and an admin, not for a member', () => {
     const fixture = TestBed.createComponent(BoardDetailComponent);
-    const component = fixture.componentInstance;
     const auth = TestBed.inject(AuthService);
     fixture.detectChanges();
 
     http.expectOne('/api/boards/7').flush({ id: 7, name: 'Sprint 1', owner: 'alice' });
-    http.expectOne('/api/boards/7/members').flush([]);
+    http.expectOne('/api/boards/7/members').flush([{ id: 1, boardId: 7, username: 'bob' }]);
     http.expectOne('/api/boards/7/lists').flush([]);
 
+    const controls = () => {
+      fixture.detectChanges();
+      const el: HTMLElement = fixture.nativeElement;
+      return {
+        members: el.querySelectorAll('.members li').length,
+        form: !!el.querySelector('form.new-member'),
+        remove: el.querySelectorAll('.members li button').length
+      };
+    };
+
     auth.username.set('bob');
-    expect(component.canManageMembers()).toBeFalse();
+    expect(controls()).toEqual({ members: 1, form: false, remove: 0 });
+
     auth.username.set('alice');
-    expect(component.canManageMembers()).toBeTrue();
+    expect(controls()).toEqual({ members: 1, form: true, remove: 1 });
+
+    auth.username.set('carol');
+    auth.roles.set(['admin']);
+    expect(controls()).toEqual({ members: 1, form: true, remove: 1 });
+  });
+
+  it('shows a readable error when adding or removing a member is refused with a 403', () => {
+    const fixture = TestBed.createComponent(BoardDetailComponent);
+    const component = fixture.componentInstance;
+    fixture.detectChanges();
+
+    http.expectOne('/api/boards/7').flush({ id: 7, name: 'Sprint 1', owner: 'alice' });
+    http.expectOne('/api/boards/7/members').flush([{ id: 1, boardId: 7, username: 'bob' }]);
+    http.expectOne('/api/boards/7/lists').flush([]);
+
+    component.newMemberName = 'carol';
+    component.addMember();
+    http.expectOne('/api/boards/7/members').flush('', { status: 403, statusText: 'Forbidden' });
+    expect(component.error()).toContain('only the owner can manage members');
+    expect(component.members().length).toBe(1);
+
+    component.removeMember(component.members()[0]);
+    http.expectOne('/api/boards/7/members/bob').flush('', { status: 403, statusText: 'Forbidden' });
+    expect(component.error()).toContain('only the owner can manage members');
+    expect(component.members().length).toBe(1);
   });
 });
