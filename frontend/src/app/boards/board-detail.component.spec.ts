@@ -302,7 +302,7 @@ describe('BoardDetailComponent', () => {
     http.expectOne('/api/boards/7/members').flush('', { status: 403, statusText: 'Forbidden' });
     http.expectOne('/api/boards/7/lists').flush('', { status: 404, statusText: 'Not Found' });
 
-    expect(navigate).toHaveBeenCalledWith(['/']);
+    expect(navigate).toHaveBeenCalledOnceWith(['/']);
     expect(fixture.componentInstance.error()).toBeTruthy();
   });
 });

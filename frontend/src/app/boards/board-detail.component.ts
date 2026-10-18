@@ -76,6 +76,9 @@ export class BoardDetailComponent implements OnInit {
   /** True from a drag start until just after it ends, so the trailing click does not open the editor. */
   private dragging = false;
 
+  /** Set once the view is on its way back to the list, so the redirect happens only once. */
+  private leaving = false;
+
   private boardId = 0;
 
   ngOnInit(): void {
@@ -357,7 +360,9 @@ export class BoardDetailComponent implements OnInit {
   }
 
   private leaveIfNoAccess(err: { status?: number }): void {
-    if (err?.status === 403 || err?.status === 404) {
+    if ((err?.status === 403 || err?.status === 404) && !this.leaving) {
+      // Several requests fail together at load time: navigate only once.
+      this.leaving = true;
       this.router.navigate(['/']);
     }
   }
