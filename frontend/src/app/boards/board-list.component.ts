@@ -3,6 +3,7 @@ import { DatePipe } from '@angular/common';
 import { FormsModule } from '@angular/forms';
 import { RouterLink } from '@angular/router';
 
+import { AuthService } from '../auth/auth.service';
 import { Board } from '../models/board';
 import { BoardService } from '../services/board.service';
 
@@ -18,12 +19,15 @@ import { BoardService } from '../services/board.service';
 })
 export class BoardListComponent implements OnInit {
   private readonly boardService = inject(BoardService);
+  private readonly auth = inject(AuthService);
 
   readonly boards = signal<Board[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
+  readonly editingBoardId = signal<number | null>(null);
 
   newBoardName = '';
+  renameDraft = '';
 
   ngOnInit(): void {
     this.reload();
@@ -34,7 +38,7 @@ export class BoardListComponent implements OnInit {
     this.error.set(null);
     this.boardService.getBoards().subscribe({
       next: boards => {
-        this.boards.set(boards);
+        this.boards.set([...boards].sort((a, b) => a.name.localeCompare(b.name)));
         this.loading.set(false);
       },
       error: err => this.fail('Could not load the boards', err)
@@ -68,6 +72,43 @@ export class BoardListComponent implements OnInit {
       next: () => this.boards.update(boards => boards.filter(b => b.id !== board.id)),
       error: err => this.fail(`Could not delete the board "${board.name}"`, err)
     });
+  }
+
+  startRename(board: Board): void {
+    if (board.id === undefined) {
+      return;
+    }
+    this.editingBoardId.set(board.id);
+    this.renameDraft = board.name;
+  }
+
+  cancelRename(): void {
+    this.editingBoardId.set(null);
+    this.renameDraft = '';
+  }
+
+  saveRename(board: Board): void {
+    const name = this.renameDraft.trim();
+    if (!name || board.id === undefined) {
+      return;
+    }
+    this.error.set(null);
+    this.boardService.renameBoard(board.id, name).subscribe({
+      next: updated => {
+        this.boards.update(boards =>
+          boards
+            .map(current => (current.id === board.id ? updated : current))
+            .sort((a, b) => a.name.localeCompare(b.name))
+        );
+        this.cancelRename();
+      },
+      error: err => this.fail(`Could not rename "${board.name}"`, err)
+    });
+  }
+
+  /** Only the owner (or an admin) may rename or delete a board; members just work inside it. */
+  canManage(board: Board): boolean {
+    return this.auth.isAdmin() || board.owner === this.auth.username();
   }
 
   private fail(message: string, err: unknown): void {

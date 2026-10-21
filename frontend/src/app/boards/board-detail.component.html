@@ -9,6 +9,36 @@
     <p class="error">{{ error() }}</p>
   }
 
+  @if (board()) {
+    <section class="members">
+      <h3>Members</h3>
+      <ul>
+        @for (member of members(); track member.id) {
+          <li>
+            {{ member.username }}
+            @if (canManageMembers()) {
+              <button type="button" class="ghost" (click)="makeOwner(member)">Make owner</button>
+              <button type="button" class="ghost" (click)="removeMember(member)">Remove</button>
+            }
+          </li>
+        } @empty {
+          <li class="muted">Not shared with anyone yet.</li>
+        }
+      </ul>
+      @if (canManageMembers()) {
+        <form class="new-member" (ngSubmit)="addMember()">
+          <input
+            name="newMemberName"
+            [(ngModel)]="newMemberName"
+            placeholder="Username to add"
+            autocomplete="off"
+            maxlength="120" />
+          <button type="submit" [disabled]="!newMemberName.trim()">Add member</button>
+        </form>
+      }
+    </section>
+  }
+
   @if (loading()) {
     <p class="muted">Loading…</p>
   } @else {

@@ -6,6 +6,22 @@ export interface Board {
   createdAt?: string;
 }
 
+/** Mirrors com.odelia.kanban.entity.BoardMember: a user a board is shared with. */
+export interface BoardMember {
+  id?: number;
+  boardId: number;
+  username: string;
+}
+
+/** Mirrors com.odelia.kanban.entity.Notification: a message for the signed-in user. */
+export interface Notification {
+  id: number;
+  boardId?: number;
+  message: string;
+  read: boolean;
+  createdAt?: string;
+}
+
 /** Mirrors com.odelia.kanban.entity.BoardList: a column of a board. */
 export interface BoardList {
   id?: number;

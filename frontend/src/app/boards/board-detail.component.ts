@@ -1,5 +1,6 @@
-import { Component, ElementRef, OnInit, inject, signal, viewChildren } from '@angular/core';
-import { ActivatedRoute, RouterLink } from '@angular/router';
+import { Component, DestroyRef, ElementRef, OnInit, inject, signal, viewChildren } from '@angular/core';
+import { takeUntilDestroyed } from '@angular/core/rxjs-interop';
+import { ActivatedRoute, Router, RouterLink } from '@angular/router';
 import { FormsModule } from '@angular/forms';
 import {
   CdkDrag,
@@ -9,9 +10,10 @@ import {
   moveItemInArray,
   transferArrayItem
 } from '@angular/cdk/drag-drop';
-import { forkJoin } from 'rxjs';
+import { EMPTY, catchError, forkJoin, switchMap, timer } from 'rxjs';
 
-import { Board, BoardList, Card } from '../models/board';
+import { AuthService } from '../auth/auth.service';
+import { Board, BoardList, BoardMember, Card } from '../models/board';
 import { BoardService } from '../services/board.service';
 
 /**
@@ -31,6 +33,9 @@ import { BoardService } from '../services/board.service';
  * several cards can be typed in a row. The description is filled in afterwards
  * through the inline card editor.
  */
+/** How often the board and its members are fetched again, in milliseconds. */
+const REFRESH_MS = 10_000;
+
 @Component({
   selector: 'app-board-detail',
   imports: [FormsModule, RouterLink, CdkDropListGroup, CdkDropList, CdkDrag],
@@ -40,13 +45,20 @@ import { BoardService } from '../services/board.service';
 export class BoardDetailComponent implements OnInit {
   private readonly route = inject(ActivatedRoute);
   private readonly boardService = inject(BoardService);
+  private readonly auth = inject(AuthService);
+  private readonly router = inject(Router);
+  private readonly destroyRef = inject(DestroyRef);
 
   readonly board = signal<Board | null>(null);
   readonly columns = signal<BoardList[]>([]);
   /** Cards keyed by column id. The arrays are mutated in place by the CDK helpers. */
   readonly cardsByList = signal<Record<number, Card[]>>({});
+  readonly members = signal<BoardMember[]>([]);
   readonly loading = signal(false);
   readonly error = signal<string | null>(null);
+
+  /** Username typed in the "add a member" field (owner only). */
+  newMemberName = '';
 
   /** One "add a card" draft (title + description) per column, keyed by column id. */
   readonly drafts: Record<number, { title: string; description: string }> = {};
@@ -64,11 +76,43 @@ export class BoardDetailComponent implements OnInit {
   /** True from a drag start until just after it ends, so the trailing click does not open the editor. */
   private dragging = false;
 
+  /** Set once the view is on its way back to the list, so the redirect happens only once. */
+  private leaving = false;
+
   private boardId = 0;
 
   ngOnInit(): void {
     this.boardId = Number(this.route.snapshot.paramMap.get('id'));
     this.reload();
+    this.watchAccess();
+  }
+
+  /**
+   * Periodic refresh of the board and its members, so a change made by someone
+   * else shows up without a page reload. Only these two are refreshed - the
+   * columns and cards are left alone so a drag or an open editor is not disturbed.
+   * If the caller lost access (403) or the board is gone (404), go back to the list.
+   */
+  private watchAccess(): void {
+    timer(REFRESH_MS, REFRESH_MS)
+      .pipe(
+        switchMap(() =>
+          forkJoin({
+            board: this.boardService.getBoard(this.boardId),
+            members: this.boardService.getMembers(this.boardId)
+          }).pipe(
+            catchError(err => {
+              this.leaveIfNoAccess(err);
+              return EMPTY;
+            })
+          )
+        ),
+        takeUntilDestroyed(this.destroyRef)
+      )
+      .subscribe(({ board, members }) => {
+        this.board.set(board);
+        this.members.set(members);
+      });
   }
 
   reload(): void {
@@ -78,14 +122,63 @@ export class BoardDetailComponent implements OnInit {
     this.composingColumnId.set(null);
     this.boardService.getBoard(this.boardId).subscribe({
       next: board => this.board.set(board),
-      error: err => this.fail('Could not load the board', err)
+      error: err => this.failLoading('Could not load the board', err)
+    });
+    this.boardService.getMembers(this.boardId).subscribe({
+      next: members => this.members.set(members),
+      error: err => this.failLoading('Could not load the members', err)
     });
     this.boardService.getLists(this.boardId).subscribe({
       next: columns => {
         this.columns.set(columns);
         this.loadCards(columns);
       },
-      error: err => this.fail('Could not load the columns', err)
+      error: err => this.failLoading('Could not load the columns', err)
+    });
+  }
+
+  /** Only the owner (or an admin) manages the members; a member just sees the list. */
+  canManageMembers(): boolean {
+    return this.auth.isAdmin() || this.board()?.owner === this.auth.username();
+  }
+
+  addMember(): void {
+    const username = this.newMemberName.trim();
+    if (!username) {
+      return;
+    }
+    this.error.set(null);
+    this.boardService.addMember(this.boardId, username).subscribe({
+      next: member => {
+        this.members.update(members => [...members, member].sort((a, b) => a.username.localeCompare(b.username)));
+        this.newMemberName = '';
+      },
+      error: err => this.failMember(`Could not add "${username}"`, err)
+    });
+  }
+
+  removeMember(member: BoardMember): void {
+    this.error.set(null);
+    this.boardService.removeMember(this.boardId, member.username).subscribe({
+      next: () => this.members.update(members => members.filter(m => m.username !== member.username)),
+      error: err => this.failMember(`Could not remove "${member.username}"`, err)
+    });
+  }
+
+  makeOwner(member: BoardMember): void {
+    if (!confirm(`Make ${member.username} the owner of this board? You will become a member.`)) {
+      return;
+    }
+    this.error.set(null);
+    this.boardService.transferOwnership(this.boardId, member.username).subscribe({
+      next: board => {
+        this.board.set(board);
+        this.boardService.getMembers(this.boardId).subscribe({
+          next: members => this.members.set(members),
+          error: err => this.fail('Could not load the members', err)
+        });
+      },
+      error: err => this.failMember(`Could not make "${member.username}" the owner`, err)
     });
   }
 
@@ -258,6 +351,30 @@ export class BoardDetailComponent implements OnInit {
   /** Re-emit the record so the template re-renders after an in-place mutation. */
   private refresh(): void {
     this.cardsByList.set({ ...this.cardsByList() });
+  }
+
+  /** Shows the error, and goes back to the list at once if the board is forbidden (403) or gone (404). */
+  private failLoading(message: string, err: { status?: number }): void {
+    this.fail(message, err);
+    this.leaveIfNoAccess(err);
+  }
+
+  private leaveIfNoAccess(err: { status?: number }): void {
+    if ((err?.status === 403 || err?.status === 404) && !this.leaving) {
+      // Several requests fail together at load time: navigate only once.
+      this.leaving = true;
+      this.router.navigate(['/']);
+    }
+  }
+
+  /** Like {@link fail}, with the reason the backend gives for the two expected refusals. */
+  private failMember(message: string, err: { status?: number }): void {
+    const reason = err.status === 400
+      ? ' (already a member, or the owner)'
+      : err.status === 403
+        ? ' (only the owner can manage members)'
+        : '';
+    this.fail(message + reason, err);
   }
 
   private fail(message: string, err: unknown): void {
